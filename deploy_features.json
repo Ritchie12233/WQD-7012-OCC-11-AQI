@@ -1,0 +1,13 @@
+[
+  "PM2.5",
+  "PM10",
+  "CO",
+  "NO2",
+  "SO2",
+  "O3",
+  "pressure",
+  "humidity",
+  "temperature",
+  "wind_direction",
+  "wind_speed"
+]

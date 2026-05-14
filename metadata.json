@@ -1,0 +1,32 @@
+{
+  "model_name": "simple_xgb_classifier",
+  "model_type": "XGBoost Classifier",
+  "task": "Next-hour standard AQI level classification",
+  "created_at": "2026-05-06T08:51:04.653006",
+  "input_type": "Raw frontend values",
+  "preprocessing": "Raw input is automatically standardized using deployment_11_feature_standard_scaler.joblib",
+  "features": [
+    "PM2.5",
+    "PM10",
+    "CO",
+    "NO2",
+    "SO2",
+    "O3",
+    "pressure",
+    "humidity",
+    "temperature",
+    "wind_direction",
+    "wind_speed"
+  ],
+  "classes": {
+    "0": "Low",
+    "1": "Moderate",
+    "2": "High"
+  },
+  "class_definition": {
+    "Low": "AQI_next <= 50",
+    "Moderate": "50 < AQI_next <= 100",
+    "High": "AQI_next > 100"
+  },
+  "deployment_note": "This is the simplified deployment model. It uses only 11 current-hour pollutant and meteorological features. Raw frontend values are standardized before prediction using the saved deployment scaler."
+}

@@ -1,0 +1,22 @@
+{
+  "model_name": "rf_regressor_11_features",
+  "model_type": "Random Forest Regressor",
+  "task": "Next-hour AQI value regression",
+  "input_type": "Standardized 11 current-hour features",
+  "features": [
+    "PM2.5",
+    "PM10",
+    "CO",
+    "NO2",
+    "SO2",
+    "O3",
+    "pressure",
+    "humidity",
+    "temperature",
+    "wind_direction",
+    "wind_speed"
+  ],
+  "target": "AQI_next_raw",
+  "created_at": "2026-05-06T09:47:50.604409",
+  "important_note": "This model expects standardized input values. Raw frontend input must be transformed using deployment_11_feature_standard_scaler.joblib before prediction."
+}
