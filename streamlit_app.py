@@ -784,7 +784,7 @@ with demo_cols[2]:
         apply_preset(HIGH_DEMO_VALUES, "High Demo")
         st.rerun()
 with demo_cols[3]:
-    with st.popover("Settings", icon="⚙", use_container_width=True, label_visibility="collapsed"):
+    with st.popover("Settings", use_container_width=True, label_visibility="collapsed", help="Input settings"):
         st.markdown("<div class='glass-card input-card'><div class='section-title'>Input Panel</div></div>", unsafe_allow_html=True)
         st.markdown(
             f"<div class='preset-strip'><div><div class='preset-kicker'>Current Demo</div><div class='preset-name'>{st.session_state.active_demo}</div></div><div class='preset-note'>Adjust values below.</div></div>",
