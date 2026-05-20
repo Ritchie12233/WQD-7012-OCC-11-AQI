@@ -17,11 +17,18 @@ if [[ -f "$PID_FILE" ]]; then
 fi
 
 cd "$SCRIPT_DIR"
-nohup "$PYTHON_BIN" -m uvicorn app:app --host 127.0.0.1 --port 8000 > "$LOG_FILE" 2>&1 &
+nohup "$PYTHON_BIN" -m uvicorn app:app --host 127.0.0.1 --port 8000 > "$LOG_FILE" 2>&1 < /dev/null &
 echo $! > "$PID_FILE"
-sleep 2
+disown "$(cat "$PID_FILE")" 2>/dev/null || true
 
-if kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+for _ in {1..15}; do
+  if kill -0 "$(cat "$PID_FILE")" 2>/dev/null && curl -fsS "http://127.0.0.1:8000/" >/dev/null; then
+    break
+  fi
+  sleep 1
+done
+
+if kill -0 "$(cat "$PID_FILE")" 2>/dev/null && curl -fsS "http://127.0.0.1:8000/" >/dev/null; then
   echo "API started on http://127.0.0.1:8000"
   echo "PID: $(cat "$PID_FILE")"
   echo "Log: $LOG_FILE"

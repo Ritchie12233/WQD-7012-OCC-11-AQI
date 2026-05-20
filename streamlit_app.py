@@ -16,6 +16,9 @@ CLASS_METADATA_PATH = BASE_DIR / "metadata.json"
 RF_DIR = BASE_DIR / "RF"
 RF_MODEL_PATH = RF_DIR / "rf_regressor_11_features.joblib"
 RF_METADATA_PATH = RF_DIR / "metadata.json"
+UNSUPERVISED_METADATA_PATH = BASE_DIR / "unsupervised_metadata.json"
+KMEANS_MODEL_PATH = BASE_DIR / "kmeans_final.joblib"
+ISOLATION_MODEL_PATH = BASE_DIR / "isolation_forest.joblib"
 
 
 @st.cache_resource
@@ -23,15 +26,31 @@ def load_artifacts():
     classifier = joblib.load(CLASSIFIER_PATH)
     scaler = joblib.load(SCALER_PATH)
     rf_regressor = joblib.load(RF_MODEL_PATH)
+    kmeans_model = joblib.load(KMEANS_MODEL_PATH)
+    isolation_model = joblib.load(ISOLATION_MODEL_PATH)
     features = json.loads(FEATURES_PATH.read_text(encoding="utf-8"))
     class_metadata = json.loads(CLASS_METADATA_PATH.read_text(encoding="utf-8"))
     rf_metadata = json.loads(RF_METADATA_PATH.read_text(encoding="utf-8"))
-    return classifier, scaler, rf_regressor, features, class_metadata, rf_metadata
+    unsupervised_metadata = json.loads(UNSUPERVISED_METADATA_PATH.read_text(encoding="utf-8"))
+    return classifier, scaler, rf_regressor, kmeans_model, isolation_model, features, class_metadata, rf_metadata, unsupervised_metadata
 
 
-classifier, scaler, rf_regressor, FEATURES, CLASS_METADATA, RF_METADATA = load_artifacts()
+(
+    classifier,
+    scaler,
+    rf_regressor,
+    kmeans_model,
+    isolation_model,
+    FEATURES,
+    CLASS_METADATA,
+    RF_METADATA,
+    UNSUPERVISED_METADATA,
+) = load_artifacts()
 CLASSES = CLASS_METADATA["classes"]
 CLASS_DEFINITION = CLASS_METADATA.get("class_definition", {})
+KMEANS_FEATURES = UNSUPERVISED_METADATA["kmeans"]["features"]
+ISOLATION_FEATURES = UNSUPERVISED_METADATA["isolation_forest"]["features"]
+CLUSTER_PROFILES = UNSUPERVISED_METADATA["kmeans"]["cluster_profiles"]
 RF_TOP_FEATURE = (
     FEATURES[int(max(range(len(FEATURES)), key=lambda index: rf_regressor.feature_importances_[index]))]
     if hasattr(rf_regressor, "feature_importances_")
@@ -211,11 +230,19 @@ def detect_input_mode(payload: dict[str, float]) -> str:
     return "Custom Input"
 
 
+def normalize_model_payload(payload: dict[str, float]) -> dict[str, float]:
+    model_payload = {feature: float(payload[feature]) for feature in FEATURES}
+    if model_payload.get("pressure", 0.0) > 200:
+        model_payload["pressure"] = model_payload["pressure"] / 10.0
+    return model_payload
+
+
 def transform_payload(payload: dict[str, float]) -> tuple[pd.DataFrame, pd.DataFrame]:
-    raw_df = pd.DataFrame([payload])[FEATURES]
-    scaled = scaler.transform(raw_df)
+    model_payload = normalize_model_payload(payload)
+    model_df = pd.DataFrame([model_payload], columns=FEATURES)
+    scaled = scaler.transform(model_df)
     scaled_df = pd.DataFrame(scaled, columns=FEATURES)
-    return raw_df, scaled_df
+    return model_df, scaled_df
 
 
 def classify_and_regress(payload: dict[str, float]) -> dict[str, object]:
@@ -373,48 +400,54 @@ def render_probability_mini(probabilities: dict[str, float], predicted_label: st
     ).strip()
 
 
-def infer_unsupervised_preview(payload: dict[str, float], current_aqi: float, driver: str) -> dict[str, object]:
-    particle_load = float(payload["PM2.5"]) + float(payload["PM10"])
-    gas_load = float(payload["CO"]) + float(payload["NO2"]) + float(payload["SO2"])
-    ozone_value = float(payload["O3"])
-    max_load = max(particle_load, gas_load * 4, ozone_value, 1.0)
-    particle_score = min(particle_load / max_load * 100, 100)
-    gas_score = min((gas_load * 4) / max_load * 100, 100)
-    ozone_score = min(ozone_value / max_load * 100, 100)
-    anomaly_score = min(current_aqi / 180 * 100, 100)
+def get_scaled_feature_values(payload: dict[str, float]) -> dict[str, float]:
+    _, scaled_df = transform_payload(payload)
+    return {feature: float(scaled_df.iloc[0][feature]) for feature in FEATURES}
 
-    if current_aqi > 150:
+
+def infer_unsupervised_preview(payload: dict[str, float], current_aqi: float, driver: str) -> dict[str, object]:
+    scaled_values = get_scaled_feature_values(payload)
+    scaled_df = pd.DataFrame([scaled_values], columns=FEATURES)
+    particle_mean = (scaled_values["PM2.5"] + scaled_values["PM10"]) / 2
+    gas_mean = (scaled_values["CO"] + scaled_values["NO2"] + scaled_values["SO2"]) / 3
+    ozone_z = scaled_values["O3"]
+
+    # K-Means uses the trained artifact saved from the full filled station dataset.
+    kmeans_input = scaled_df[KMEANS_FEATURES]
+    cluster_id = int(kmeans_model.predict(kmeans_input)[0])
+    profile = CLUSTER_PROFILES.get(str(cluster_id), {
+        "label": "Unlabelled Cluster",
+        "pattern": "Model-derived cluster",
+    })
+    particle_score = min(max((particle_mean + 2.0) / 6.0 * 100, 0), 100)
+    gas_score = min(max((gas_mean + 2.0) / 6.0 * 100, 0), 100)
+    ozone_score = min(max((ozone_z + 2.0) / 6.0 * 100, 0), 100)
+
+    # Isolation Forest uses the trained anomaly detector and a 5% contamination setting.
+    isolation_input = scaled_df[ISOLATION_FEATURES]
+    isolation_label = int(isolation_model.predict(isolation_input)[0])
+    decision_score = float(isolation_model.decision_function(isolation_input)[0])
+    anomaly_score = min(max(50.0 - (decision_score * 250.0), 0.0), 100.0)
+
+    if isolation_label == -1:
         anomaly = "High anomaly risk"
-        anomaly_note = "Extreme pollution-like input"
+        anomaly_note = "Isolation Forest outlier"
         anomaly_color = "#D49880"
         anomaly_level = "HIGH"
-    elif current_aqi > 100:
+    elif anomaly_score >= 45:
         anomaly = "Watch zone"
-        anomaly_note = "Elevated but not extreme"
+        anomaly_note = "Near anomaly boundary"
         anomaly_color = "#E8A860"
         anomaly_level = "WATCH"
     else:
         anomaly = "Normal range"
-        anomaly_note = "No strong anomaly signal"
+        anomaly_note = "Isolation Forest inlier"
         anomaly_color = "#7BC8A4"
         anomaly_level = "NORMAL"
 
-    if particle_load >= max(gas_load * 8, ozone_value):
-        cluster = "Cluster A"
-        pattern = "Particle-heavy pattern"
-    elif ozone_value >= max(particle_load, gas_load * 6):
-        cluster = "Cluster B"
-        pattern = "Ozone / photochemical pattern"
-    elif gas_load > 45:
-        cluster = "Cluster C"
-        pattern = "Combustion gas pattern"
-    else:
-        cluster = "Cluster D"
-        pattern = "Background air pattern"
-
     return {
-        "cluster": cluster,
-        "pattern": pattern,
+        "cluster": f"Cluster {cluster_id}",
+        "pattern": f'{profile["label"]} · {profile["pattern"]}',
         "anomaly": anomaly,
         "anomaly_note": anomaly_note,
         "anomaly_color": anomaly_color,

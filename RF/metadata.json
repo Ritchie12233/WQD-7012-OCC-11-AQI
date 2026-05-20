@@ -18,5 +18,5 @@
   ],
   "target": "AQI_next_raw",
   "created_at": "2026-05-06T09:47:50.604409",
-  "important_note": "This model expects standardized input values. Raw frontend input must be transformed using deployment_11_feature_standard_scaler.joblib before prediction."
+  "important_note": "This model expects standardized input values. Raw frontend input must be transformed using deployment_11_feature_standard_scaler.joblib before prediction. Pressure is normalized to the model's training scale before prediction."
 }
