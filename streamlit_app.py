@@ -770,6 +770,9 @@ st.markdown(
 st.markdown(render_background_art(), unsafe_allow_html=True)
 st.markdown("<div class='hero-strip'><div class='hero-title'>Next-hour AQI Prediction</div></div>", unsafe_allow_html=True)
 
+if "show_inputs" not in st.session_state:
+    st.session_state.show_inputs = False
+
 demo_cols = st.columns([1, 1, 1, 0.18], gap="small")
 with demo_cols[0]:
     if st.button("Low Demo", use_container_width=True):
@@ -784,19 +787,24 @@ with demo_cols[2]:
         apply_preset(HIGH_DEMO_VALUES, "High Demo")
         st.rerun()
 with demo_cols[3]:
-    with st.popover("⚙", use_container_width=True):
-        st.markdown("<div class='glass-card input-card'><div class='section-title'>Input Panel</div></div>", unsafe_allow_html=True)
-        st.markdown(
-            f"<div class='preset-strip'><div><div class='preset-kicker'>Current Demo</div><div class='preset-name'>{st.session_state.active_demo}</div></div><div class='preset-note'>Adjust values below.</div></div>",
-            unsafe_allow_html=True,
-        )
+    gear_label = "✕" if st.session_state.show_inputs else "⚙"
+    if st.button(gear_label, use_container_width=True, key="gear_btn"):
+        st.session_state.show_inputs = not st.session_state.show_inputs
+        st.rerun()
 
-        for index, feature in enumerate(FEATURES):
-            unit = FEATURE_UNITS.get(feature, "")
-            label = f"{feature} ({unit})" if unit else feature
-            st.number_input(label, step=0.01, format="%.2f", key=f"feature_{feature}")
+if st.session_state.show_inputs:
+    st.markdown("<div class='glass-card input-card'><div class='section-title'>Input Panel</div></div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='preset-strip'><div><div class='preset-kicker'>Current Demo</div><div class='preset-name'>{st.session_state.active_demo}</div></div><div class='preset-note'>Adjust values below.</div></div>",
+        unsafe_allow_html=True,
+    )
 
-        st.markdown("<div class='auto-note'>Auto-updating: results refresh when any input changes.</div>", unsafe_allow_html=True)
+    for index, feature in enumerate(FEATURES):
+        unit = FEATURE_UNITS.get(feature, "")
+        label = f"{feature} ({unit})" if unit else feature
+        st.number_input(label, step=0.01, format="%.2f", key=f"feature_{feature}")
+
+    st.markdown("<div class='auto-note'>Auto-updating: results refresh when any input changes.</div>", unsafe_allow_html=True)
 
 payload = {feature: float(st.session_state[f"feature_{feature}"]) for feature in FEATURES}
 st.session_state.active_demo = detect_input_mode(payload)
