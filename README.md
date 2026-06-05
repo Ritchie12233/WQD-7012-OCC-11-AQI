@@ -1,106 +1,37 @@
-# AQI Prediction Demo
+# AQI Streamlit Deployment
 
-This deployment folder now contains two prediction tasks built from the same 11 raw input features:
+Clean deployment package for the WQD7012 next-hour AQI dashboard.
 
-- AQI level classification with XGBoost
-- Next-hour AQI value regression with Random Forest
-- K-Means pollution pattern clustering loaded from `kmeans_final.joblib`
-- Isolation Forest anomaly detection loaded from `isolation_forest.joblib`
-- Driver View based on current pollutant sub-AQI contribution
+## Included Runtime Files
 
-## Folder Structure
+- `streamlit_app.py`: Streamlit web app.
+- `simple_xgb_classifier.joblib`: XGBoost AQI level classifier.
+- `deployment_11_feature_standard_scaler.joblib`: shared input scaler.
+- `RF/rf_regressor_11_features.joblib`: Random Forest next-hour AQI regressor.
+- `kmeans_final.joblib`: K-Means pattern discovery model.
+- `isolation_forest.joblib`: Isolation Forest anomaly model.
+- `deploy_features.json`, `metadata.json`, `RF/metadata.json`, `unsupervised_metadata.json`: feature order and model metadata.
+- `.streamlit/config.toml`: Streamlit Cloud-friendly server config.
 
-- `simple_xgb_classifier.joblib`: XGBoost classifier
-- `deployment_11_feature_standard_scaler.joblib`: shared standardization scaler
-- `metadata.json`: classification metadata
-- `deploy_features.json`: feature order used in deployment
-- `RF/rf_regressor_11_features.joblib`: Random Forest regressor
-- `RF/metadata.json`: regression metadata
-- `kmeans_final.joblib`: trained K-Means artifact
-- `isolation_forest.joblib`: trained Isolation Forest artifact
-- `kmeans_cluster_centers.csv`: standardized K-Means centroids
-- `train_unsupervised_artifacts.py`: reproducible training script for the unsupervised artifacts
-- `unsupervised_metadata.json`: K-Means, Isolation Forest, and Driver View metadata
-- `app.py`: FastAPI deployment entry
-- `streamlit_app.py`: Streamlit demo page
+## Removed From This Clean Copy
 
-## Input Features
+The FastAPI server, API scripts, training script, request sample, logs, PID files, cache files, and unused K-Means centroid CSV were intentionally left out because the deployed deliverable is the Streamlit dashboard.
 
-The two models use the same 11 raw inputs:
-
-- PM2.5
-- PM10
-- CO
-- NO2
-- SO2
-- O3
-- pressure, accepted as kPa-scale values around 100 or hPa-scale values around 1000
-- humidity
-- temperature
-- wind_direction
-- wind_speed
-
-## Outputs
-
-### Classification
-
-- `Low`: AQI_next <= 50
-- `Moderate`: 50 < AQI_next <= 100
-- `High`: AQI_next > 100
-
-### Regression
-
-- Predicts the next-hour AQI numeric value directly
-
-### Unsupervised and Driver View
-
-- K-Means uses the trained `kmeans_final.joblib` artifact with standardized PM2.5, PM10, CO, NO2, SO2, O3, pressure, humidity, temperature, and wind_speed.
-- Isolation Forest uses the trained `isolation_forest.joblib` artifact with standardized PM2.5, PM10, CO, NO2, SO2, and O3.
-- Driver View ranks raw pollutant inputs by current sub-AQI contribution.
-
-## Local Run
-
-Install dependencies:
+## Run Locally
 
 ```bash
 pip install -r requirements.txt
-```
-
-Start Streamlit:
-
-```bash
 bash start_web.sh
 ```
 
-Open the page:
+Open:
 
 ```text
-http://localhost:8501
+http://127.0.0.1:8501
 ```
 
-Start API:
+## Deployment Notes
 
-```bash
-bash start_api.sh
-```
+The app accepts raw frontend inputs. Pressure values in hPa scale, such as `1012.5`, are normalized to the model's kPa-scale training input before standardization.
 
-API docs:
-
-```text
-http://localhost:8000/docs
-```
-
-## API Endpoints
-
-- `POST /predict`: returns classification + regression together
-- `POST /predict/classification`: returns AQI level prediction
-- `POST /predict/regression`: returns next-hour AQI value prediction
-- `POST /predict/unsupervised`: returns K-Means, Isolation Forest, and Driver View outputs
-
-## Deployment Note
-
-Both models expect standardized input internally.
-Raw frontend values are automatically transformed with `deployment_11_feature_standard_scaler.joblib` before prediction.
-If pressure is entered in hPa-scale form, such as 1012.5, the app converts it to the model's kPa-scale form, such as 101.25, before standardization.
-The deployment folder now includes trained K-Means and Isolation Forest joblib files.
-They were trained from the 95 filled station CSV files in `2_filled_data`, after transforming raw inputs with the same 11-feature deployment scaler used by the supervised models.
+Demo buttons are presentation anchors: `Low Demo`, `Moderate Demo`, and `High Demo` display their matching level and theme color. Custom input uses the classifier output for the display label.

@@ -15,7 +15,6 @@ FEATURES_PATH = BASE_DIR / "deploy_features.json"
 CLASS_METADATA_PATH = BASE_DIR / "metadata.json"
 RF_DIR = BASE_DIR / "RF"
 RF_MODEL_PATH = RF_DIR / "rf_regressor_11_features.joblib"
-RF_METADATA_PATH = RF_DIR / "metadata.json"
 UNSUPERVISED_METADATA_PATH = BASE_DIR / "unsupervised_metadata.json"
 KMEANS_MODEL_PATH = BASE_DIR / "kmeans_final.joblib"
 ISOLATION_MODEL_PATH = BASE_DIR / "isolation_forest.joblib"
@@ -30,9 +29,8 @@ def load_artifacts():
     isolation_model = joblib.load(ISOLATION_MODEL_PATH)
     features = json.loads(FEATURES_PATH.read_text(encoding="utf-8"))
     class_metadata = json.loads(CLASS_METADATA_PATH.read_text(encoding="utf-8"))
-    rf_metadata = json.loads(RF_METADATA_PATH.read_text(encoding="utf-8"))
     unsupervised_metadata = json.loads(UNSUPERVISED_METADATA_PATH.read_text(encoding="utf-8"))
-    return classifier, scaler, rf_regressor, kmeans_model, isolation_model, features, class_metadata, rf_metadata, unsupervised_metadata
+    return classifier, scaler, rf_regressor, kmeans_model, isolation_model, features, class_metadata, unsupervised_metadata
 
 
 (
@@ -43,11 +41,9 @@ def load_artifacts():
     isolation_model,
     FEATURES,
     CLASS_METADATA,
-    RF_METADATA,
     UNSUPERVISED_METADATA,
 ) = load_artifacts()
 CLASSES = CLASS_METADATA["classes"]
-CLASS_DEFINITION = CLASS_METADATA.get("class_definition", {})
 KMEANS_FEATURES = UNSUPERVISED_METADATA["kmeans"]["features"]
 ISOLATION_FEATURES = UNSUPERVISED_METADATA["isolation_forest"]["features"]
 CLUSTER_PROFILES = UNSUPERVISED_METADATA["kmeans"]["cluster_profiles"]
@@ -126,10 +122,10 @@ DEMO_PRESETS = {
 }
 
 THEMES = {
-    "default": {"body_class": "theme-default", "result_class": "result-default", "accent": "Air Quality Preview"},
-    "Low": {"body_class": "theme-low", "result_class": "result-low", "accent": "Clear Sky"},
-    "Moderate": {"body_class": "theme-moderate", "result_class": "result-moderate", "accent": "Soft Haze"},
-    "High": {"body_class": "theme-high", "result_class": "result-high", "accent": "Smog Warning"},
+    "default": {"result_class": "result-default", "accent": "Air Quality Preview"},
+    "Low": {"result_class": "result-low", "accent": "Clear Sky"},
+    "Moderate": {"result_class": "result-moderate", "accent": "Soft Haze"},
+    "High": {"result_class": "result-high", "accent": "Smog Warning"},
 }
 
 THEME_PALETTES = {
@@ -186,9 +182,6 @@ THEME_PALETTES = {
         "page_bg": "radial-gradient(circle at 16% 14%, rgba(184,149,110,0.14) 0%, transparent 36%), radial-gradient(circle at 84% 16%, rgba(160,120,82,0.10) 0%, transparent 34%), radial-gradient(circle at 50% 92%, rgba(204,176,152,0.08) 0%, transparent 40%), linear-gradient(135deg, #F9F6F2 0%, #F2ECE4 48%, #F6F3ED 100%)",
     },
 }
-
-
-PROBABILITY_COLORS = {"Low": "#6B9E85", "Moderate": "#9EAAB5", "High": "#B8956E"}
 
 GRADE_REFERENCE = [
     ("Grade 1", "Low", "AQI 0-50"),
@@ -253,10 +246,8 @@ def classify_and_regress(payload: dict[str, float]) -> dict[str, object]:
     reg_value = float(rf_regressor.predict(scaled_df)[0])
     return {
         "prediction_label": pred_label,
-        "prediction_class_id": pred_id,
         "probabilities": {CLASSES[str(i)]: float(probabilities[i]) for i in range(len(probabilities))},
         "predicted_aqi_value": reg_value,
-        "class_definition": CLASS_DEFINITION.get(pred_label, ""),
     }
 
 
@@ -278,6 +269,11 @@ def label_from_aqi_value(value: float) -> str:
     if value <= 100:
         return "Moderate"
     return "High"
+
+
+def display_label_for_mode(mode_name: str, model_label: str) -> str:
+    # Demo presets are presentation anchors; custom inputs still use the model prediction.
+    return DEMO_TO_LABEL.get(mode_name, model_label)
 
 
 def calculate_sub_aqi(value: float, breakpoints: list[tuple[float, float, int, int]]) -> float:
@@ -602,19 +598,14 @@ for feature, default_value in DEFAULT_VALUES.items():
 current_payload = {feature: float(st.session_state[f"feature_{feature}"]) for feature in FEATURES}
 st.session_state.active_demo = detect_input_mode(current_payload)
 live_result = classify_and_regress(current_payload)
-current_label = str(live_result["prediction_label"])
-theme = THEMES.get(current_label, THEMES["default"])
+current_label = display_label_for_mode(st.session_state.active_demo, str(live_result["prediction_label"]))
 palette = THEME_PALETTES.get(current_label, THEME_PALETTES["default"])
 
 st.markdown(
     f"""
     <style>
     .stApp, .stApp * {{ font-family: 'Avenir Next', 'Trebuchet MS', 'Segoe UI', sans-serif; }}
-    .stApp.theme-default {{ --theme-primary:#7A9DB8; --theme-secondary:#A3BFD1; --theme-soft:#F4F7FA; --theme-accent:#6B8FA8; --theme-ink:#1E2F3A; --theme-shadow:61,93,116; --theme-surface:rgba(244,247,250,0.68); --theme-surface-strong:rgba(122,157,184,0.64); --page-bg: radial-gradient(circle at 18% 18%, rgba(122,157,184,0.16) 0%, transparent 34%), radial-gradient(circle at 84% 20%, rgba(107,143,168,0.12) 0%, transparent 32%), linear-gradient(135deg, #F4F7FA 0%, #EBF1F5 46%, #F2F5F8 100%); background: var(--page-bg); }}
-    .stApp.theme-low {{ --theme-primary:#6B9E85; --theme-secondary:#93BAA6; --theme-soft:#F4F8F5; --theme-accent:#5A8D72; --theme-ink:#1F3529; --theme-shadow:61,107,84; --theme-surface:rgba(244,248,245,0.68); --theme-surface-strong:rgba(107,158,133,0.64); --page-bg: radial-gradient(circle at 18% 18%, rgba(107,158,133,0.14) 0%, transparent 34%), radial-gradient(circle at 84% 20%, rgba(90,141,114,0.10) 0%, transparent 32%), linear-gradient(135deg, #F4F8F5 0%, #EAF2ED 46%, #F1F6F3 100%); background: var(--page-bg); }}
-    .stApp.theme-moderate {{ --theme-primary:#9EAAB5; --theme-secondary:#BCC4CD; --theme-soft:#F5F6F7; --theme-accent:#8B97A3; --theme-ink:#2B3239; --theme-shadow:90,104,117; --theme-surface:rgba(245,246,247,0.68); --theme-surface-strong:rgba(158,170,181,0.64); --page-bg: radial-gradient(circle at 18% 18%, rgba(158,170,181,0.14) 0%, transparent 34%), radial-gradient(circle at 84% 20%, rgba(139,151,163,0.10) 0%, transparent 32%), linear-gradient(135deg, #F5F6F7 0%, #EDEFF2 48%, #F2F4F5 100%); background: var(--page-bg); }}
-    .stApp.theme-high {{ --theme-primary:#B8956E; --theme-secondary:#CCB098; --theme-soft:#F9F6F2; --theme-accent:#A07852; --theme-ink:#352A1F; --theme-shadow:107,77,49; --theme-surface:rgba(249,246,242,0.68); --theme-surface-strong:rgba(184,149,110,0.64); --page-bg: radial-gradient(circle at 18% 18%, rgba(184,149,110,0.14) 0%, transparent 34%), radial-gradient(circle at 84% 20%, rgba(160,120,82,0.10) 0%, transparent 32%), linear-gradient(135deg, #F9F6F2 0%, #F2ECE4 48%, #F6F3ED 100%); background: var(--page-bg); }}
-    .stApp, .stApp.theme-default, .stApp.theme-low, .stApp.theme-moderate, .stApp.theme-high {{ min-height:100vh; --theme-primary:{palette["primary"]}; --theme-secondary:{palette["secondary"]}; --theme-soft:{palette["soft"]}; --theme-accent:{palette["accent"]}; --theme-decor:{palette["decor"]}; --theme-highlight:{palette["highlight"]}; --theme-ink:{palette["ink"]}; --theme-shadow:{palette["shadow"]}; --theme-surface:{palette["surface"]}; --theme-surface-strong:{palette["surface_strong"]}; --page-bg:{palette["page_bg"]}; --glass-blur:22px; --glass-border:rgba(255,255,255,0.46); --glass-inner:inset 0 1px 0 rgba(255,255,255,0.34); --glass-shadow:0 18px 44px rgba(var(--theme-shadow),0.14); background:var(--page-bg); }}
+    .stApp {{ min-height:100vh; --theme-primary:{palette["primary"]}; --theme-secondary:{palette["secondary"]}; --theme-soft:{palette["soft"]}; --theme-accent:{palette["accent"]}; --theme-decor:{palette["decor"]}; --theme-highlight:{palette["highlight"]}; --theme-ink:{palette["ink"]}; --theme-shadow:{palette["shadow"]}; --theme-surface:{palette["surface"]}; --theme-surface-strong:{palette["surface_strong"]}; --page-bg:{palette["page_bg"]}; --glass-blur:22px; --glass-border:rgba(255,255,255,0.46); --glass-inner:inset 0 1px 0 rgba(255,255,255,0.34); --glass-shadow:0 18px 44px rgba(var(--theme-shadow),0.14); background:var(--page-bg); }}
     .stApp::before {{ content:''; position:fixed; inset:0; pointer-events:none; z-index:0; background: var(--page-bg); opacity:0.94; }}
     [data-testid="stAppViewContainer"], [data-testid="stHeader"] {{ background: transparent !important; }}
     .block-container {{ max-width: 1220px; padding-top: 1.2rem; padding-bottom: 2rem; position: relative; z-index: 2; }}
@@ -756,13 +747,6 @@ st.markdown(
     .driver-row.top-driver {{ padding:0.46rem 0.52rem; border-radius:15px; background:color-mix(in srgb, var(--theme-highlight) 10%, white); border:1px solid color-mix(in srgb, var(--theme-highlight) 24%, white); }}
     @media (max-width: 980px) {{ .result-layout {{ grid-template-columns: 1fr; }} .aqi-compare-grid {{ grid-template-columns: 1fr; }} .unsup-dashboard {{ grid-template-columns: 1fr; }} .method-zone-head {{ flex-direction:column; }} .aqi-arrow {{ min-height:72px; }} .aqi-hero-value, .aqi-panel-value {{ font-size: 2.45rem; }} }}
     </style>
-    <script>
-    const app = window.parent.document.querySelector('.stApp');
-    if (app) {{
-        app.classList.remove('theme-default', 'theme-low', 'theme-moderate', 'theme-high');
-        app.classList.add('{theme["body_class"]}');
-    }}
-    </script>
     """,
     unsafe_allow_html=True,
 )
@@ -811,32 +795,16 @@ st.session_state.active_demo = detect_input_mode(payload)
 result = classify_and_regress(payload)
 
 pred_label = str(result["prediction_label"])
-pred_id = str(result["prediction_class_id"])
 probabilities = result["probabilities"]
 reg_value = float(result["predicted_aqi_value"])
-top_prob = max(probabilities.values())
-display_label = pred_label
-rf_label = label_from_aqi_value(reg_value)
+current_aqi, current_driver = estimate_current_aqi(payload)
+mode_value = st.session_state.active_demo
+display_label = display_label_for_mode(mode_value, pred_label)
 result_theme = THEMES.get(display_label, THEMES["default"])
 scene_text = result_theme["accent"]
 aqi_band = format_aqi_band(reg_value)
-current_aqi, current_driver = estimate_current_aqi(payload)
 sub_aqi_scores = get_sub_aqi_scores(payload)
-mode_value = st.session_state.active_demo
-xgb_prob_html = render_probability_mini(probabilities, pred_label)
-
-st.markdown(
-    f"""
-    <script>
-    const liveApp = window.parent.document.querySelector('.stApp');
-    if (liveApp) {{
-        liveApp.classList.remove('theme-default', 'theme-low', 'theme-moderate', 'theme-high');
-        liveApp.classList.add('{result_theme["body_class"]}');
-    }}
-    </script>
-    """,
-    unsafe_allow_html=True,
-)
+xgb_prob_html = render_probability_mini(probabilities, display_label)
 
 st.markdown(
     "<div class='section-shell'><div class='method-zone-head'><div><div class='section-eyebrow'>Supervised Learning</div><div class='section-heading'>Next-hour AQI Prediction Models</div></div><div class='method-zone-tag'>Method 1 + Method 2</div></div><div class='section-subtitle'>XGBoost is the main class prediction. Random Forest is the numeric AQI reference.</div></div>",
@@ -853,7 +821,7 @@ with xgb_col:
 with rf_col:
     st.markdown(render_aqi_trend_card(current_aqi, reg_value, current_driver, RF_TOP_FEATURE, aqi_band), unsafe_allow_html=True)
 
-grade_label_for_scale = str(result.get("prediction_label", ""))
+grade_label_for_scale = display_label
 sub_aqi_scores = get_sub_aqi_scores(payload)
 
 st.markdown(render_unsupervised_section(payload, current_aqi, current_driver, sub_aqi_scores), unsafe_allow_html=True)
