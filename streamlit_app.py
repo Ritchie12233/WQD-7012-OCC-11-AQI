@@ -15,7 +15,9 @@ FEATURES_PATH = BASE_DIR / "deploy_features.json"
 CLASS_METADATA_PATH = BASE_DIR / "metadata.json"
 RF_DIR = BASE_DIR / "RF"
 RF_MODEL_PATH = RF_DIR / "rf_regressor_11_features.joblib"
-RF_METADATA_PATH = RF_DIR / "metadata.json"
+UNSUPERVISED_METADATA_PATH = BASE_DIR / "unsupervised_metadata.json"
+KMEANS_MODEL_PATH = BASE_DIR / "kmeans_final.joblib"
+ISOLATION_MODEL_PATH = BASE_DIR / "isolation_forest.joblib"
 
 
 @st.cache_resource
@@ -23,15 +25,28 @@ def load_artifacts():
     classifier = joblib.load(CLASSIFIER_PATH)
     scaler = joblib.load(SCALER_PATH)
     rf_regressor = joblib.load(RF_MODEL_PATH)
+    kmeans_model = joblib.load(KMEANS_MODEL_PATH)
+    isolation_model = joblib.load(ISOLATION_MODEL_PATH)
     features = json.loads(FEATURES_PATH.read_text(encoding="utf-8"))
     class_metadata = json.loads(CLASS_METADATA_PATH.read_text(encoding="utf-8"))
-    rf_metadata = json.loads(RF_METADATA_PATH.read_text(encoding="utf-8"))
-    return classifier, scaler, rf_regressor, features, class_metadata, rf_metadata
+    unsupervised_metadata = json.loads(UNSUPERVISED_METADATA_PATH.read_text(encoding="utf-8"))
+    return classifier, scaler, rf_regressor, kmeans_model, isolation_model, features, class_metadata, unsupervised_metadata
 
 
-classifier, scaler, rf_regressor, FEATURES, CLASS_METADATA, RF_METADATA = load_artifacts()
+(
+    classifier,
+    scaler,
+    rf_regressor,
+    kmeans_model,
+    isolation_model,
+    FEATURES,
+    CLASS_METADATA,
+    UNSUPERVISED_METADATA,
+) = load_artifacts()
 CLASSES = CLASS_METADATA["classes"]
-CLASS_DEFINITION = CLASS_METADATA.get("class_definition", {})
+KMEANS_FEATURES = UNSUPERVISED_METADATA["kmeans"]["features"]
+ISOLATION_FEATURES = UNSUPERVISED_METADATA["isolation_forest"]["features"]
+CLUSTER_PROFILES = UNSUPERVISED_METADATA["kmeans"]["cluster_profiles"]
 RF_TOP_FEATURE = (
     FEATURES[int(max(range(len(FEATURES)), key=lambda index: rf_regressor.feature_importances_[index]))]
     if hasattr(rf_regressor, "feature_importances_")
@@ -107,10 +122,10 @@ DEMO_PRESETS = {
 }
 
 THEMES = {
-    "default": {"body_class": "theme-default", "result_class": "result-default", "accent": "Air Quality Preview"},
-    "Low": {"body_class": "theme-low", "result_class": "result-low", "accent": "Clear Sky"},
-    "Moderate": {"body_class": "theme-moderate", "result_class": "result-moderate", "accent": "Soft Haze"},
-    "High": {"body_class": "theme-high", "result_class": "result-high", "accent": "Smog Warning"},
+    "default": {"result_class": "result-default", "accent": "Air Quality Preview"},
+    "Low": {"result_class": "result-low", "accent": "Clear Sky"},
+    "Moderate": {"result_class": "result-moderate", "accent": "Soft Haze"},
+    "High": {"result_class": "result-high", "accent": "Smog Warning"},
 }
 
 THEME_PALETTES = {
@@ -168,9 +183,6 @@ THEME_PALETTES = {
     },
 }
 
-
-PROBABILITY_COLORS = {"Low": "#6B9E85", "Moderate": "#9EAAB5", "High": "#B8956E"}
-
 GRADE_REFERENCE = [
     ("Grade 1", "Low", "AQI 0-50"),
     ("Grade 2", "Moderate", "AQI 51-100"),
@@ -211,11 +223,19 @@ def detect_input_mode(payload: dict[str, float]) -> str:
     return "Custom Input"
 
 
+def normalize_model_payload(payload: dict[str, float]) -> dict[str, float]:
+    model_payload = {feature: float(payload[feature]) for feature in FEATURES}
+    if model_payload.get("pressure", 0.0) > 200:
+        model_payload["pressure"] = model_payload["pressure"] / 10.0
+    return model_payload
+
+
 def transform_payload(payload: dict[str, float]) -> tuple[pd.DataFrame, pd.DataFrame]:
-    raw_df = pd.DataFrame([payload])[FEATURES]
-    scaled = scaler.transform(raw_df)
+    model_payload = normalize_model_payload(payload)
+    model_df = pd.DataFrame([model_payload], columns=FEATURES)
+    scaled = scaler.transform(model_df)
     scaled_df = pd.DataFrame(scaled, columns=FEATURES)
-    return raw_df, scaled_df
+    return model_df, scaled_df
 
 
 def classify_and_regress(payload: dict[str, float]) -> dict[str, object]:
@@ -226,10 +246,8 @@ def classify_and_regress(payload: dict[str, float]) -> dict[str, object]:
     reg_value = float(rf_regressor.predict(scaled_df)[0])
     return {
         "prediction_label": pred_label,
-        "prediction_class_id": pred_id,
         "probabilities": {CLASSES[str(i)]: float(probabilities[i]) for i in range(len(probabilities))},
         "predicted_aqi_value": reg_value,
-        "class_definition": CLASS_DEFINITION.get(pred_label, ""),
     }
 
 
@@ -251,6 +269,11 @@ def label_from_aqi_value(value: float) -> str:
     if value <= 100:
         return "Moderate"
     return "High"
+
+
+def display_label_for_mode(mode_name: str, model_label: str) -> str:
+    # Demo presets are presentation anchors; custom inputs still use the model prediction.
+    return DEMO_TO_LABEL.get(mode_name, model_label)
 
 
 def calculate_sub_aqi(value: float, breakpoints: list[tuple[float, float, int, int]]) -> float:
@@ -373,48 +396,54 @@ def render_probability_mini(probabilities: dict[str, float], predicted_label: st
     ).strip()
 
 
-def infer_unsupervised_preview(payload: dict[str, float], current_aqi: float, driver: str) -> dict[str, object]:
-    particle_load = float(payload["PM2.5"]) + float(payload["PM10"])
-    gas_load = float(payload["CO"]) + float(payload["NO2"]) + float(payload["SO2"])
-    ozone_value = float(payload["O3"])
-    max_load = max(particle_load, gas_load * 4, ozone_value, 1.0)
-    particle_score = min(particle_load / max_load * 100, 100)
-    gas_score = min((gas_load * 4) / max_load * 100, 100)
-    ozone_score = min(ozone_value / max_load * 100, 100)
-    anomaly_score = min(current_aqi / 180 * 100, 100)
+def get_scaled_feature_values(payload: dict[str, float]) -> dict[str, float]:
+    _, scaled_df = transform_payload(payload)
+    return {feature: float(scaled_df.iloc[0][feature]) for feature in FEATURES}
 
-    if current_aqi > 150:
+
+def infer_unsupervised_preview(payload: dict[str, float], current_aqi: float, driver: str) -> dict[str, object]:
+    scaled_values = get_scaled_feature_values(payload)
+    scaled_df = pd.DataFrame([scaled_values], columns=FEATURES)
+    particle_mean = (scaled_values["PM2.5"] + scaled_values["PM10"]) / 2
+    gas_mean = (scaled_values["CO"] + scaled_values["NO2"] + scaled_values["SO2"]) / 3
+    ozone_z = scaled_values["O3"]
+
+    # K-Means uses the trained artifact saved from the full filled station dataset.
+    kmeans_input = scaled_df[KMEANS_FEATURES]
+    cluster_id = int(kmeans_model.predict(kmeans_input)[0])
+    profile = CLUSTER_PROFILES.get(str(cluster_id), {
+        "label": "Unlabelled Cluster",
+        "pattern": "Model-derived cluster",
+    })
+    particle_score = min(max((particle_mean + 2.0) / 6.0 * 100, 0), 100)
+    gas_score = min(max((gas_mean + 2.0) / 6.0 * 100, 0), 100)
+    ozone_score = min(max((ozone_z + 2.0) / 6.0 * 100, 0), 100)
+
+    # Isolation Forest uses the trained anomaly detector and a 5% contamination setting.
+    isolation_input = scaled_df[ISOLATION_FEATURES]
+    isolation_label = int(isolation_model.predict(isolation_input)[0])
+    decision_score = float(isolation_model.decision_function(isolation_input)[0])
+    anomaly_score = min(max(50.0 - (decision_score * 250.0), 0.0), 100.0)
+
+    if isolation_label == -1:
         anomaly = "High anomaly risk"
-        anomaly_note = "Extreme pollution-like input"
+        anomaly_note = "Isolation Forest outlier"
         anomaly_color = "#D49880"
         anomaly_level = "HIGH"
-    elif current_aqi > 100:
+    elif anomaly_score >= 45:
         anomaly = "Watch zone"
-        anomaly_note = "Elevated but not extreme"
+        anomaly_note = "Near anomaly boundary"
         anomaly_color = "#E8A860"
         anomaly_level = "WATCH"
     else:
         anomaly = "Normal range"
-        anomaly_note = "No strong anomaly signal"
+        anomaly_note = "Isolation Forest inlier"
         anomaly_color = "#7BC8A4"
         anomaly_level = "NORMAL"
 
-    if particle_load >= max(gas_load * 8, ozone_value):
-        cluster = "Cluster A"
-        pattern = "Particle-heavy pattern"
-    elif ozone_value >= max(particle_load, gas_load * 6):
-        cluster = "Cluster B"
-        pattern = "Ozone / photochemical pattern"
-    elif gas_load > 45:
-        cluster = "Cluster C"
-        pattern = "Combustion gas pattern"
-    else:
-        cluster = "Cluster D"
-        pattern = "Background air pattern"
-
     return {
-        "cluster": cluster,
-        "pattern": pattern,
+        "cluster": f"Cluster {cluster_id}",
+        "pattern": f'{profile["label"]} · {profile["pattern"]}',
         "anomaly": anomaly,
         "anomaly_note": anomaly_note,
         "anomaly_color": anomaly_color,
@@ -569,19 +598,14 @@ for feature, default_value in DEFAULT_VALUES.items():
 current_payload = {feature: float(st.session_state[f"feature_{feature}"]) for feature in FEATURES}
 st.session_state.active_demo = detect_input_mode(current_payload)
 live_result = classify_and_regress(current_payload)
-current_label = str(live_result["prediction_label"])
-theme = THEMES.get(current_label, THEMES["default"])
+current_label = display_label_for_mode(st.session_state.active_demo, str(live_result["prediction_label"]))
 palette = THEME_PALETTES.get(current_label, THEME_PALETTES["default"])
 
 st.markdown(
     f"""
     <style>
     .stApp, .stApp * {{ font-family: 'Avenir Next', 'Trebuchet MS', 'Segoe UI', sans-serif; }}
-    .stApp.theme-default {{ --theme-primary:#7A9DB8; --theme-secondary:#A3BFD1; --theme-soft:#F4F7FA; --theme-accent:#6B8FA8; --theme-ink:#1E2F3A; --theme-shadow:61,93,116; --theme-surface:rgba(244,247,250,0.68); --theme-surface-strong:rgba(122,157,184,0.64); --page-bg: radial-gradient(circle at 18% 18%, rgba(122,157,184,0.16) 0%, transparent 34%), radial-gradient(circle at 84% 20%, rgba(107,143,168,0.12) 0%, transparent 32%), linear-gradient(135deg, #F4F7FA 0%, #EBF1F5 46%, #F2F5F8 100%); background: var(--page-bg); }}
-    .stApp.theme-low {{ --theme-primary:#6B9E85; --theme-secondary:#93BAA6; --theme-soft:#F4F8F5; --theme-accent:#5A8D72; --theme-ink:#1F3529; --theme-shadow:61,107,84; --theme-surface:rgba(244,248,245,0.68); --theme-surface-strong:rgba(107,158,133,0.64); --page-bg: radial-gradient(circle at 18% 18%, rgba(107,158,133,0.14) 0%, transparent 34%), radial-gradient(circle at 84% 20%, rgba(90,141,114,0.10) 0%, transparent 32%), linear-gradient(135deg, #F4F8F5 0%, #EAF2ED 46%, #F1F6F3 100%); background: var(--page-bg); }}
-    .stApp.theme-moderate {{ --theme-primary:#9EAAB5; --theme-secondary:#BCC4CD; --theme-soft:#F5F6F7; --theme-accent:#8B97A3; --theme-ink:#2B3239; --theme-shadow:90,104,117; --theme-surface:rgba(245,246,247,0.68); --theme-surface-strong:rgba(158,170,181,0.64); --page-bg: radial-gradient(circle at 18% 18%, rgba(158,170,181,0.14) 0%, transparent 34%), radial-gradient(circle at 84% 20%, rgba(139,151,163,0.10) 0%, transparent 32%), linear-gradient(135deg, #F5F6F7 0%, #EDEFF2 48%, #F2F4F5 100%); background: var(--page-bg); }}
-    .stApp.theme-high {{ --theme-primary:#B8956E; --theme-secondary:#CCB098; --theme-soft:#F9F6F2; --theme-accent:#A07852; --theme-ink:#352A1F; --theme-shadow:107,77,49; --theme-surface:rgba(249,246,242,0.68); --theme-surface-strong:rgba(184,149,110,0.64); --page-bg: radial-gradient(circle at 18% 18%, rgba(184,149,110,0.14) 0%, transparent 34%), radial-gradient(circle at 84% 20%, rgba(160,120,82,0.10) 0%, transparent 32%), linear-gradient(135deg, #F9F6F2 0%, #F2ECE4 48%, #F6F3ED 100%); background: var(--page-bg); }}
-    .stApp, .stApp.theme-default, .stApp.theme-low, .stApp.theme-moderate, .stApp.theme-high {{ min-height:100vh; --theme-primary:{palette["primary"]}; --theme-secondary:{palette["secondary"]}; --theme-soft:{palette["soft"]}; --theme-accent:{palette["accent"]}; --theme-decor:{palette["decor"]}; --theme-highlight:{palette["highlight"]}; --theme-ink:{palette["ink"]}; --theme-shadow:{palette["shadow"]}; --theme-surface:{palette["surface"]}; --theme-surface-strong:{palette["surface_strong"]}; --page-bg:{palette["page_bg"]}; --glass-blur:22px; --glass-border:rgba(255,255,255,0.46); --glass-inner:inset 0 1px 0 rgba(255,255,255,0.34); --glass-shadow:0 18px 44px rgba(var(--theme-shadow),0.14); background:var(--page-bg); }}
+    .stApp {{ min-height:100vh; --theme-primary:{palette["primary"]}; --theme-secondary:{palette["secondary"]}; --theme-soft:{palette["soft"]}; --theme-accent:{palette["accent"]}; --theme-decor:{palette["decor"]}; --theme-highlight:{palette["highlight"]}; --theme-ink:{palette["ink"]}; --theme-shadow:{palette["shadow"]}; --theme-surface:{palette["surface"]}; --theme-surface-strong:{palette["surface_strong"]}; --page-bg:{palette["page_bg"]}; --glass-blur:22px; --glass-border:rgba(255,255,255,0.46); --glass-inner:inset 0 1px 0 rgba(255,255,255,0.34); --glass-shadow:0 18px 44px rgba(var(--theme-shadow),0.14); background:var(--page-bg); }}
     .stApp::before {{ content:''; position:fixed; inset:0; pointer-events:none; z-index:0; background: var(--page-bg); opacity:0.94; }}
     [data-testid="stAppViewContainer"], [data-testid="stHeader"] {{ background: transparent !important; }}
     .block-container {{ max-width: 1220px; padding-top: 1.2rem; padding-bottom: 2rem; position: relative; z-index: 2; }}
@@ -680,7 +704,7 @@ st.markdown(
     [data-testid="stHorizontalBlock"] > div:nth-child(1) [data-testid="stButton"] > button {{ background: linear-gradient(135deg, #6B9E85 0%, #93BAA6 100%) !important; }}
     [data-testid="stHorizontalBlock"] > div:nth-child(2) [data-testid="stButton"] > button {{ background: linear-gradient(135deg, #9EAAB5 0%, #BCC4CD 100%) !important; }}
     [data-testid="stHorizontalBlock"] > div:nth-child(3) [data-testid="stButton"] > button {{ background: linear-gradient(135deg, #B8956E 0%, #CCB098 100%) !important; }}
-    div[data-testid='stPopover'] > button {{ border-radius:999px !important; min-height:2.55rem !important; width:2.75rem !important; padding:0 !important; background:var(--theme-surface-strong) !important; color:var(--theme-ink) !important; border:1px solid rgba(255,255,255,0.54) !important; box-shadow:0 10px 24px rgba(var(--theme-shadow),0.16) !important; }}
+    div[data-testid='stPopover'] > button {{ border-radius:999px !important; min-height:2.55rem !important; width:2.75rem !important; padding:0 !important; background:var(--theme-surface-strong) !important; color:var(--theme-ink) !important; border:1px solid rgba(255,255,255,0.54) !important; box-shadow:0 10px 24px rgba(var(--theme-shadow),0.16) !important; overflow:hidden !important; white-space:nowrap !important; }}
     .auto-note {{ margin-top:0.7rem; padding:0.75rem 0.9rem; border-radius:16px; background:rgba(255,255,255,0.38); border:1px solid rgba(255,255,255,0.48); color:#4d6778; font-size:0.82rem; font-weight:700; }}
     .scale-shell {{ margin-top: 0.9rem; padding: 0.68rem 0.85rem; }}
     .grade-card-horizontal {{ display:flex; align-items:center; justify-content:space-between; gap:0.6rem; min-height: 114px; text-align:left; color:white; border-radius:18px; padding:0.72rem 0.72rem; opacity:0.92; border:1px solid rgba(255,255,255,0.28); box-shadow:0 12px 28px rgba(var(--theme-shadow),0.12); }}
@@ -723,19 +747,15 @@ st.markdown(
     .driver-row.top-driver {{ padding:0.46rem 0.52rem; border-radius:15px; background:color-mix(in srgb, var(--theme-highlight) 10%, white); border:1px solid color-mix(in srgb, var(--theme-highlight) 24%, white); }}
     @media (max-width: 980px) {{ .result-layout {{ grid-template-columns: 1fr; }} .aqi-compare-grid {{ grid-template-columns: 1fr; }} .unsup-dashboard {{ grid-template-columns: 1fr; }} .method-zone-head {{ flex-direction:column; }} .aqi-arrow {{ min-height:72px; }} .aqi-hero-value, .aqi-panel-value {{ font-size: 2.45rem; }} }}
     </style>
-    <script>
-    const app = window.parent.document.querySelector('.stApp');
-    if (app) {{
-        app.classList.remove('theme-default', 'theme-low', 'theme-moderate', 'theme-high');
-        app.classList.add('{theme["body_class"]}');
-    }}
-    </script>
     """,
     unsafe_allow_html=True,
 )
 
 st.markdown(render_background_art(), unsafe_allow_html=True)
 st.markdown("<div class='hero-strip'><div class='hero-title'>Next-hour AQI Prediction</div></div>", unsafe_allow_html=True)
+
+if "show_inputs" not in st.session_state:
+    st.session_state.show_inputs = False
 
 demo_cols = st.columns([1, 1, 1, 0.18], gap="small")
 with demo_cols[0]:
@@ -751,51 +771,40 @@ with demo_cols[2]:
         apply_preset(HIGH_DEMO_VALUES, "High Demo")
         st.rerun()
 with demo_cols[3]:
-    with st.popover("⚙", use_container_width=True):
-        st.markdown("<div class='glass-card input-card'><div class='section-title'>Input Panel</div></div>", unsafe_allow_html=True)
-        st.markdown(
-            f"<div class='preset-strip'><div><div class='preset-kicker'>Current Demo</div><div class='preset-name'>{st.session_state.active_demo}</div></div><div class='preset-note'>Adjust values below.</div></div>",
-            unsafe_allow_html=True,
-        )
+    gear_label = "✕" if st.session_state.show_inputs else "⚙"
+    if st.button(gear_label, use_container_width=True, key="gear_btn"):
+        st.session_state.show_inputs = not st.session_state.show_inputs
+        st.rerun()
 
-        for index, feature in enumerate(FEATURES):
-            unit = FEATURE_UNITS.get(feature, "")
-            label = f"{feature} ({unit})" if unit else feature
-            st.number_input(label, step=0.01, format="%.2f", key=f"feature_{feature}")
+if st.session_state.show_inputs:
+    st.markdown("<div class='glass-card input-card'><div class='section-title'>Input Panel</div></div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='preset-strip'><div><div class='preset-kicker'>Current Demo</div><div class='preset-name'>{st.session_state.active_demo}</div></div><div class='preset-note'>Adjust values below.</div></div>",
+        unsafe_allow_html=True,
+    )
 
-        st.markdown("<div class='auto-note'>Auto-updating: results refresh when any input changes.</div>", unsafe_allow_html=True)
+    for index, feature in enumerate(FEATURES):
+        unit = FEATURE_UNITS.get(feature, "")
+        label = f"{feature} ({unit})" if unit else feature
+        st.number_input(label, step=0.01, format="%.2f", key=f"feature_{feature}")
+
+    st.markdown("<div class='auto-note'>Auto-updating: results refresh when any input changes.</div>", unsafe_allow_html=True)
 
 payload = {feature: float(st.session_state[f"feature_{feature}"]) for feature in FEATURES}
 st.session_state.active_demo = detect_input_mode(payload)
 result = classify_and_regress(payload)
 
 pred_label = str(result["prediction_label"])
-pred_id = str(result["prediction_class_id"])
 probabilities = result["probabilities"]
 reg_value = float(result["predicted_aqi_value"])
-top_prob = max(probabilities.values())
-display_label = pred_label
-rf_label = label_from_aqi_value(reg_value)
+current_aqi, current_driver = estimate_current_aqi(payload)
+mode_value = st.session_state.active_demo
+display_label = display_label_for_mode(mode_value, pred_label)
 result_theme = THEMES.get(display_label, THEMES["default"])
 scene_text = result_theme["accent"]
 aqi_band = format_aqi_band(reg_value)
-current_aqi, current_driver = estimate_current_aqi(payload)
 sub_aqi_scores = get_sub_aqi_scores(payload)
-mode_value = st.session_state.active_demo
-xgb_prob_html = render_probability_mini(probabilities, pred_label)
-
-st.markdown(
-    f"""
-    <script>
-    const liveApp = window.parent.document.querySelector('.stApp');
-    if (liveApp) {{
-        liveApp.classList.remove('theme-default', 'theme-low', 'theme-moderate', 'theme-high');
-        liveApp.classList.add('{result_theme["body_class"]}');
-    }}
-    </script>
-    """,
-    unsafe_allow_html=True,
-)
+xgb_prob_html = render_probability_mini(probabilities, display_label)
 
 st.markdown(
     "<div class='section-shell'><div class='method-zone-head'><div><div class='section-eyebrow'>Supervised Learning</div><div class='section-heading'>Next-hour AQI Prediction Models</div></div><div class='method-zone-tag'>Method 1 + Method 2</div></div><div class='section-subtitle'>XGBoost is the main class prediction. Random Forest is the numeric AQI reference.</div></div>",
@@ -812,7 +821,7 @@ with xgb_col:
 with rf_col:
     st.markdown(render_aqi_trend_card(current_aqi, reg_value, current_driver, RF_TOP_FEATURE, aqi_band), unsafe_allow_html=True)
 
-grade_label_for_scale = str(result.get("prediction_label", ""))
+grade_label_for_scale = display_label
 sub_aqi_scores = get_sub_aqi_scores(payload)
 
 st.markdown(render_unsupervised_section(payload, current_aqi, current_driver, sub_aqi_scores), unsafe_allow_html=True)

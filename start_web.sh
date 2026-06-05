@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PYTHON_BIN="/opt/anaconda3/bin/python3"
+cd "$(dirname "$0")"
+PYTHON_BIN="${PYTHON_BIN:-/opt/anaconda3/bin/python3}"
+if [ ! -x "$PYTHON_BIN" ]; then
+  PYTHON_BIN="python3"
+fi
 
-cd "$SCRIPT_DIR"
-"$PYTHON_BIN" -m streamlit run streamlit_app.py --server.port 8501 --server.address 127.0.0.1
+"$PYTHON_BIN" -m streamlit run streamlit_app.py --server.port "${PORT:-8501}" --server.address 127.0.0.1
