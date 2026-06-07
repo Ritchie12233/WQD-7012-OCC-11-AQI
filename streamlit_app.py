@@ -47,11 +47,6 @@ CLASSES = CLASS_METADATA["classes"]
 KMEANS_FEATURES = UNSUPERVISED_METADATA["kmeans"]["features"]
 ISOLATION_FEATURES = UNSUPERVISED_METADATA["isolation_forest"]["features"]
 CLUSTER_PROFILES = UNSUPERVISED_METADATA["kmeans"]["cluster_profiles"]
-RF_TOP_FEATURE = (
-    FEATURES[int(max(range(len(FEATURES)), key=lambda index: rf_regressor.feature_importances_[index]))]
-    if hasattr(rf_regressor, "feature_importances_")
-    else "N/A"
-)
 
 DEFAULT_VALUES = {
     "PM2.5": 12.50,
@@ -307,7 +302,7 @@ def estimate_current_aqi(payload: dict[str, float]) -> tuple[float, str]:
     return float(sub_scores[driver]), driver
 
 
-def render_aqi_trend_card(current_aqi: float, predicted_aqi: float, driver: str, rf_driver: str, band: str) -> str:
+def render_aqi_trend_card(current_aqi: float, predicted_aqi: float, driver: str, band: str) -> str:
     delta = predicted_aqi - current_aqi
     change_pct = abs(delta) / max(current_aqi, 1.0) * 100
     if delta > 5:
@@ -353,7 +348,7 @@ def render_aqi_trend_card(current_aqi: float, predicted_aqi: float, driver: str,
                 <div class='aqi-value-panel next-panel'>
                     <div class='aqi-panel-label'>RF Next-hour AQI</div>
                     <div class='aqi-panel-value'>{predicted_aqi:.2f}</div>
-                    <div class='aqi-panel-note'>RF key feature<br><span class='driver-pill rf-pill'>{rf_driver}</span></div>
+                    <div class='aqi-panel-note'>Current key pollutant<br><span class='driver-pill rf-pill'>{driver}</span></div>
                     <div class='aqi-panel-band'>{band}</div>
                 </div>
             </div>
@@ -819,7 +814,7 @@ with xgb_col:
     )
 
 with rf_col:
-    st.markdown(render_aqi_trend_card(current_aqi, reg_value, current_driver, RF_TOP_FEATURE, aqi_band), unsafe_allow_html=True)
+    st.markdown(render_aqi_trend_card(current_aqi, reg_value, current_driver, aqi_band), unsafe_allow_html=True)
 
 grade_label_for_scale = display_label
 sub_aqi_scores = get_sub_aqi_scores(payload)
