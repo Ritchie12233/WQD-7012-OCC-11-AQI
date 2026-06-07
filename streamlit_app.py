@@ -69,11 +69,11 @@ DEFAULT_VALUES = {
 
 LOW_DEMO_VALUES = {
     "PM2.5": 6.00,
-    "PM10": 18.00,
+    "PM10": 28.00,
     "CO": 0.20,
     "NO2": 8.00,
     "SO2": 2.00,
-    "O3": 28.00,
+    "O3": 18.00,
     "pressure": 1018.00,
     "humidity": 42.00,
     "temperature": 24.00,
@@ -83,11 +83,11 @@ LOW_DEMO_VALUES = {
 
 MODERATE_DEMO_VALUES = {
     "PM2.5": 45.00,
-    "PM10": 88.00,
+    "PM10": 234.00,
     "CO": 1.20,
     "NO2": 35.00,
     "SO2": 10.00,
-    "O3": 82.00,
+    "O3": 59.44,
     "pressure": 1008.00,
     "humidity": 58.00,
     "temperature": 29.00,
@@ -97,11 +97,11 @@ MODERATE_DEMO_VALUES = {
 
 HIGH_DEMO_VALUES = {
     "PM2.5": 135.00,
-    "PM10": 220.00,
+    "PM10": 400.42,
     "CO": 4.60,
     "NO2": 120.00,
     "SO2": 68.00,
-    "O3": 168.00,
+    "O3": 79.90,
     "pressure": 998.00,
     "humidity": 80.00,
     "temperature": 36.00,
